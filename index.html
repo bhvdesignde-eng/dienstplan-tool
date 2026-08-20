@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#161a1f">
+<title>Dienstplan</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root{
+    --bg: #14171c;
+    --panel: #1b2027;
+    --panel2: #21272f;
+    --line: #2c333d;
+    --ink: #e7ebf0;
+    --ink-dim: #8b95a3;
+    --amber: #e8a33d;
+    --amber-dim: #7a5a26;
+    --ok: #4caf7d;
+    --warn: #d9534f;
+    --radius: 10px;
+    --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); padding-bottom:90px;
+    -webkit-font-smoothing:antialiased;
+  }
+  header{
+    background:var(--panel); border-bottom:1px solid var(--line);
+    padding:16px 18px 14px; position:sticky; top:0; z-index:20;
+  }
+  .brand{display:flex; align-items:center; gap:10px; margin-bottom:12px;}
+  .brand .mark{
+    width:30px;height:30px;border-radius:7px;background:linear-gradient(155deg,var(--amber),#b9781f);
+    display:flex;align-items:center;justify-content:center; font-family:var(--mono); font-weight:700; color:#1a1305; font-size:14px;
+  }
+  .brand h1{font-size:16px; margin:0; letter-spacing:.2px; font-weight:600;}
+  .brand .sub{font-size:11px; color:var(--ink-dim); font-family:var(--mono); margin-top:1px;}
+  .monthbar{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .monthbar .navbtn{
+    background:var(--panel2); border:1px solid var(--line); color:var(--ink);
+    width:36px;height:36px;border-radius:8px; font-size:16px; display:flex;align-items:center;justify-content:center;
+  }
+  .monthlabel{font-family:var(--mono); font-size:14px; font-weight:600; letter-spacing:.5px; text-align:center; flex:1;}
+  .tabs{display:flex; gap:6px; margin-top:12px;}
+  .tab{
+    flex:1; text-align:center; padding:9px 4px; border-radius:8px; font-size:12.5px; font-weight:600;
+    background:var(--panel2); color:var(--ink-dim); border:1px solid var(--line);
+  }
+  .tab.active{background:var(--amber); color:#1a1305; border-color:var(--amber);}
+
+  main{padding:14px;}
+  section{display:none;}
+  section.active{display:block;}
+
+  /* PLAN GRID */
+  .gridwrap{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel);}
+  table.plan{border-collapse:collapse; width:100%; font-family:var(--mono); font-size:11px;}
+  table.plan th, table.plan td{border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:0;}
+  table.plan th{background:var(--panel2); color:var(--ink-dim); font-weight:600; padding:8px 4px; position:sticky; top:0; z-index:5;}
+  .empcol{position:sticky; left:0; z-index:6; background:var(--panel2); text-align:left; padding:8px 10px !important; min-width:110px; font-size:12px;}
+  table.plan th.empcol{z-index:8;}
+  .daycol{min-width:34px; text-align:center; color:var(--ink-dim); font-weight:600;}
+  .daycol.weekend{color:var(--amber);}
+  .totalcol{min-width:52px; text-align:center; font-weight:700; color:var(--amber);}
+  .cell{
+    width:34px; height:38px; text-align:center; vertical-align:middle; cursor:pointer;
+    font-size:10px; font-weight:700; user-select:none;
+  }
+  .cell.weekend{background:rgba(255,255,255,0.02);}
+  .cell:active{filter:brightness(1.3);}
+  .empname{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:110px;}
+  .empdot{display:inline-block; width:8px;height:8px;border-radius:2px; margin-right:6px;}
+
+  .legend{display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;}
+  .legend .chip{
+    display:flex; align-items:center; gap:5px; font-size:11px; color:var(--ink-dim);
+    background:var(--panel); border:1px solid var(--line); padding:4px 8px; border-radius:6px;
+  }
+  .legend .sw{width:10px;height:10px;border-radius:2px;}
+
+  .totrow{margin-top:14px; display:grid; grid-template-columns:1fr auto; gap:6px 10px; font-family:var(--mono); font-size:12px;}
+  .totrow .name{color:var(--ink-dim);}
+  .totrow .hrs{text-align:right; color:var(--ink); font-weight:600;}
+
+  /* MITARBEITER TAB */
+  .emplist{display:flex; flex-direction:column; gap:8px;}
+  .empcard{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:12px 14px; display:flex; align-items:center; gap:12px;
+  }
+  .swatch{width:14px;height:14px;border-radius:4px; flex-shrink:0;}
+  .empcard .name{flex:1; font-size:14px; font-weight:600;}
+  .empcard .del{color:var(--warn); font-size:12px; font-family:var(--mono); padding:6px 8px;}
+  .addrow{display:flex; gap:8px; margin-top:14px;}
+  .addrow input{flex:1;}
+  .addrow button{background:var(--amber); color:#1a1305; font-weight:700; border:none; border-radius:8px; padding:0 16px;}
+
+  input[type=text], input[type=time], input[type=color]{
+    background:var(--panel2); border:1px solid var(--line); color:var(--ink);
+    border-radius:8px; padding:10px 12px; font-size:14px; font-family:var(--sans);
+  }
+  input[type=color]{padding:2px; width:40px; height:40px; cursor:pointer;}
+
+  .hint{color:var(--ink-dim); font-size:11.5px; line-height:1.5; margin-top:14px;}
+
+  /* BOTTOM ACTIONBAR */
+  .actionbar{
+    position:fixed; bottom:0; left:0; right:0; background:var(--panel);
+    border-top:1px solid var(--line); padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+    display:flex; gap:10px; z-index:20;
+  }
+  .actionbar button{
+    flex:1; padding:13px; border-radius:9px; border:none; font-weight:700; font-size:13.5px;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .btn-primary{background:var(--amber); color:#1a1305;}
+  .btn-ghost{background:var(--panel2); color:var(--ink); border:1px solid var(--line) !important;}
+
+  /* MODAL - Shift picker */
+  .overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
+    display:none; align-items:flex-end; justify-content:center;
+  }
+  .overlay.show{display:flex;}
+  .sheet{
+    background:var(--panel); border-radius:16px 16px 0 0; width:100%; max-width:480px;
+    padding:18px 18px calc(18px + env(safe-area-inset-bottom)); border-top:1px solid var(--line);
+    animation:up .18s ease-out;
+  }
+  @keyframes up{from{transform:translateY(30px); opacity:0;} to{transform:translateY(0); opacity:1;}}
+  .sheet h3{margin:0 0 4px; font-size:15px;}
+  .sheet .meta{color:var(--ink-dim); font-size:12px; font-family:var(--mono); margin-bottom:14px;}
+  .shiftgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+  .shiftopt{
+    background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:12px 6px;
+    text-align:center; font-size:12px; font-weight:600; color:var(--ink);
+  }
+  .shiftopt .lbl{display:block; margin-bottom:3px;}
+  .shiftopt .time{display:block; font-family:var(--mono); font-size:10px; color:var(--ink-dim);}
+  .customrow{display:flex; gap:8px; margin-top:12px; align-items:center;}
+  .customrow input{flex:1;}
+  .sheet-actions{display:flex; gap:8px; margin-top:14px;}
+  .sheet-actions button{flex:1; padding:12px; border-radius:9px; border:none; font-weight:700; font-size:13px;}
+  .clearbtn{background:transparent; color:var(--warn); border:1px solid var(--warn) !important;}
+  .closebtn{background:var(--panel2); color:var(--ink); border:1px solid var(--line) !important;}
+
+  ::-webkit-scrollbar{height:8px; width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="mark">DP</div>
+    <div>
+      <h1>Dienstplan</h1>
+      <div class="sub" id="teamLabel">Team-Übersicht</div>
+    </div>
+  </div>
+  <div class="monthbar">
+    <button class="navbtn" onclick="shiftMonth(-1)">‹</button>
+    <div class="monthlabel" id="monthLabel">—</div>
+    <button class="navbtn" onclick="shiftMonth(1)">›</button>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-tab="plan" onclick="showTab('plan')">Plan</div>
+    <div class="tab" data-tab="team" onclick="showTab('team')">Mitarbeiter</div>
+    <div class="tab" data-tab="summary" onclick="showTab('summary')">Stunden</div>
+  </div>
+</header>
+
+<main>
+  <section id="tab-plan" class="active">
+    <div id="emptyPlanHint" class="hint" style="display:none; margin-bottom:10px;">Noch keine Mitarbeiter angelegt. Unter „Mitarbeiter" zuerst das Team eintragen.</div>
+    <div class="gridwrap"><table class="plan" id="planTable"></table></div>
+    <div class="legend" id="legend"></div>
+    <div class="hint">Zelle antippen, um eine Schicht zuzuweisen. Nach rechts scrollen für weitere Tage.</div>
+  </section>
+
+  <section id="tab-team">
+    <div class="emplist" id="empList"></div>
+    <div class="addrow">
+      <input type="color" id="newColor" value="#e8a33d">
+      <input type="text" id="newName" placeholder="Name des Mitarbeiters">
+      <button onclick="addEmployee()">+</button>
+    </div>
+    <div class="hint">Mitarbeiter hier anlegen oder entfernen. Die Farbe erscheint im Plan und im PDF.</div>
+  </section>
+
+  <section id="tab-summary">
+    <div class="totrow" id="summaryList"></div>
+    <div class="hint">Gesamtstunden pro Mitarbeiter für den ausgewählten Monat, berechnet aus allen eingetragenen Schichten.</div>
+  </section>
+</main>
+
+<div class="actionbar">
+  <button class="btn-ghost" onclick="exportPDF()">📄 PDF exportieren</button>
+  <button class="btn-primary" onclick="showTab('team')">👤 Mitarbeiter</button>
+</div>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this) closeSheet()">
+  <div class="sheet">
+    <h3 id="sheetTitle">Schicht wählen</h3>
+    <div class="meta" id="sheetMeta"></div>
+    <div class="shiftgrid" id="shiftGrid"></div>
+    <div class="customrow" id="customRow" style="display:none;">
+      <input type="time" id="customStart" value="08:00">
+      <span style="color:var(--ink-dim)">–</span>
+      <input type="time" id="customEnd" value="16:00">
+      <button class="btn-primary" style="border-radius:8px;padding:10px 14px;" onclick="applyCustom()">OK</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="clearbtn" onclick="clearCell()">Löschen</button>
+      <button class="closebtn" onclick="closeSheet()">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- Daten & Speicher ---------- */
+const STORAGE_KEY = 'dienstplan_v1';
+let state = loadState();
+
+function loadState(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(raw){ try{ return JSON.parse(raw); }catch(e){} }
+  return {
+    employees: [],
+    shifts: {}, // key: empId|YYYY-MM-DD -> {type, start, end, hours}
+    teamLabel: 'Team-Übersicht'
+  };
+}
+function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function uid(){ return 'e'+Math.random().toString(36).slice(2,9); }
+
+/* ---------- Schicht-Presets ---------- */
+const PRESETS = {
+  tag:    {label:'Tag',    time:'07–19', start:'07:00', end:'19:00', color:'#4c9fe8'},
+  spaet:  {label:'Spät',   time:'12–22', start:'12:00', end:'22:00', color:'#c96bd8'},
+  nacht:  {label:'Nacht',  time:'19–07', start:'19:00', end:'07:00', color:'#7a5a26'},
+  urlaub: {label:'Urlaub', time:'—',     start:null,    end:null,    color:'#4caf7d', hours:0},
+  frei:   {label:'Frei',   time:'—',     start:null,    end:null,    color:'#3a4048', hours:0},
+  krank:  {label:'Krank',  time:'—',     start:null,    end:null,    color:'#d9534f', hours:0},
+  custom: {label:'Zeit…',  time:'frei wählbar', color:'#e8a33d'}
+};
+
+/* ---------- Zeit / Kalender ---------- */
+let cur = new Date();
+cur.setDate(1);
+const MONTHNAMES = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+const WD = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+
+function daysInMonth(d){ return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate(); }
+function fmtKey(y,m,day){ return `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`; }
+function shiftMonth(delta){ cur.setMonth(cur.getMonth()+delta); render(); }
+
+function calcHours(entry){
+  if(!entry) return 0;
+  if(entry.hours !== undefined) return entry.hours;
+  if(!entry.start || !entry.end) return 0;
+  let [sh,sm] = entry.start.split(':').map(Number);
+  let [eh,em] = entry.end.split(':').map(Number);
+  let start = sh*60+sm, end = eh*60+em;
+  if(end <= start) end += 24*60; // über Mitternacht
+  return Math.round((end-start)/60*100)/100;
+}
+
+/* ---------- Tabs ---------- */
+function showTab(name){
+  document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  render();
+}
+
+/* ---------- Render: Plan-Grid ---------- */
+function render(){
+  document.getElementById('monthLabel').textContent = `${MONTHNAMES[cur.getMonth()]} ${cur.getFullYear()}`;
+  renderPlan();
+  renderLegend();
+  renderTeam();
+  renderSummary();
+  saveState();
+}
+
+function renderPlan(){
+  document.getElementById('emptyPlanHint').style.display = state.employees.length ? 'none' : 'block';
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const nDays = daysInMonth(cur);
+  const table = document.getElementById('planTable');
+  let html = '<thead><tr><th class="empcol">Mitarbeiter</th>';
+  for(let d=1; d<=nDays; d++){
+    const wd = new Date(y,m,d).getDay();
+    const weekend = (wd===0||wd===6);
+    html += `<th class="daycol ${weekend?'weekend':''}">${d}<br><span style="font-size:8px;">${WD[wd]}</span></th>`;
+  }
+  html += '<th class="totalcol">Σ Std.</th></tr></thead><tbody>';
+
+  state.employees.forEach(emp=>{
+    html += `<tr><td class="empcol"><span class="empdot" style="background:${emp.color}"></span><span class="empname">${escapeHtml(emp.name)}</span></td>`;
+    let total = 0;
+    for(let d=1; d<=nDays; d++){
+      const key = emp.id+'|'+fmtKey(y,m,d);
+      const entry = state.shifts[key];
+      const wd = new Date(y,m,d).getDay();
+      const weekend = (wd===0||wd===6);
+      let bg = 'transparent', label = '', fg = 'var(--ink-dim)';
+      if(entry){
+        const preset = PRESETS[entry.type] || PRESETS.custom;
+        bg = entry.type==='custom' ? '#3a2f14' : preset.color;
+        label = entry.type==='custom' ? shortTime(entry.start) : preset.label.slice(0,1)+ (entry.type==='urlaub'?'U':entry.type==='frei'?'':entry.type==='krank'?'K':'');
+        if(entry.type==='tag') label='T';
+        if(entry.type==='spaet') label='S';
+        if(entry.type==='nacht') label='N';
+        if(entry.type==='urlaub') label='U';
+        if(entry.type==='krank') label='K';
+        if(entry.type==='frei') label='—';
+        fg = '#14171c';
+        total += calcHours(entry);
+      }
+      html += `<td class="cell ${weekend?'weekend':''}" style="background:${bg}; color:${fg}" onclick="openSheet('${emp.id}',${y},${m},${d})">${label}</td>`;
+    }
+    html += `<td class="totalcol">${total}</td></tr>`;
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+function shortTime(t){ return t ? t.slice(0,2) : ''; }
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderLegend(){
+  const el = document.getElementById('legend');
+  el.innerHTML = Object.entries(PRESETS).filter(([k])=>k!=='custom').map(([k,p])=>
+    `<div class="chip"><span class="sw" style="background:${p.color}"></span>${p.label} ${p.time!=='—'?p.time:''}</div>`
+  ).join('');
+}
+
+/* ---------- Render: Team-Tab ---------- */
+function renderTeam(){
+  const el = document.getElementById('empList');
+  el.innerHTML = state.employees.map(emp=>`
+    <div class="empcard">
+      <span class="swatch" style="background:${emp.color}"></span>
+      <span class="name">${escapeHtml(emp.name)}</span>
+      <span class="del" onclick="removeEmployee('${emp.id}')">Entfernen</span>
+    </div>
+  `).join('') || '<div class="hint">Noch keine Mitarbeiter angelegt.</div>';
+}
+
+function addEmployee(){
+  const nameEl = document.getElementById('newName');
+  const colorEl = document.getElementById('newColor');
+  const name = nameEl.value.trim();
+  if(!name) return;
+  state.employees.push({id: uid(), name, color: colorEl.value});
+  nameEl.value = '';
+  render();
+}
+
+function removeEmployee(id){
+  if(!confirm('Mitarbeiter und alle zugehörigen Schichten wirklich entfernen?')) return;
+  state.employees = state.employees.filter(e=>e.id!==id);
+  Object.keys(state.shifts).forEach(k=>{ if(k.startsWith(id+'|')) delete state.shifts[k]; });
+  render();
+}
+
+/* ---------- Render: Stunden-Tab ---------- */
+function renderSummary(){
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const nDays = daysInMonth(cur);
+  const el = document.getElementById('summaryList');
+  let rows = '';
+  let grandTotal = 0;
+  state.employees.forEach(emp=>{
+    let total = 0;
+    for(let d=1; d<=nDays; d++){
+      const entry = state.shifts[emp.id+'|'+fmtKey(y,m,d)];
+      total += calcHours(entry);
+    }
+    grandTotal += total;
+    rows += `<div class="name"><span class="empdot" style="background:${emp.color}"></span>${escapeHtml(emp.name)}</div><div class="hrs">${total} Std.</div>`;
+  });
+  rows += `<div class="name" style="color:var(--ink);font-weight:700;margin-top:8px;border-top:1px solid var(--line);padding-top:8px;">Gesamt Team</div><div class="hrs" style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px;">${grandTotal} Std.</div>`;
+  el.innerHTML = rows;
+}
+
+/* ---------- Sheet / Schicht-Auswahl ---------- */
+let activeCell = null;
+
+function openSheet(empId, y, m, d){
+  const emp = state.employees.find(e=>e.id===empId);
+  activeCell = {empId, key: empId+'|'+fmtKey(y,m,d), y, m, d};
+  document.getElementById('sheetTitle').textContent = emp.name;
+  document.getElementById('sheetMeta').textContent = `${d}. ${MONTHNAMES[m]} ${y} · ${WD[new Date(y,m,d).getDay()]}`;
+  const grid = document.getElementById('shiftGrid');
+  grid.innerHTML = Object.entries(PRESETS).map(([k,p])=>`
+    <div class="shiftopt" style="border-color:${p.color}66" onclick="pickPreset('${k}')">
+      <span class="lbl">${p.label}</span><span class="time">${p.time}</span>
+    </div>`).join('');
+  document.getElementById('customRow').style.display = 'none';
+  document.getElementById('overlay').classList.add('show');
+}
+
+function pickPreset(key){
+  if(key === 'custom'){
+    document.getElementById('customRow').style.display = 'flex';
+    return;
+  }
+  const p = PRESETS[key];
+  state.shifts[activeCell.key] = {type:key, start:p.start, end:p.end, hours: p.hours};
+  closeSheet();
+  render();
+}
+
+function applyCustom(){
+  const start = document.getElementById('customStart').value;
+  const end = document.getElementById('customEnd').value;
+  state.shifts[activeCell.key] = {type:'custom', start, end};
+  closeSheet();
+  render();
+}
+
+function clearCell(){
+  delete state.shifts[activeCell.key];
+  closeSheet();
+  render();
+}
+
+function closeSheet(){
+  document.getElementById('overlay').classList.remove('show');
+  activeCell = null;
+}
+
+/* ---------- PDF Export ---------- */
+function exportPDF(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({orientation:'landscape', unit:'mm', format:'a4'});
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const nDays = daysInMonth(cur);
+  const title = `Dienstplan – ${MONTHNAMES[m]} ${y}`;
+
+  doc.setFontSize(15);
+  doc.setFont(undefined,'bold');
+  doc.text(title, 14, 14);
+  doc.setFontSize(9);
+  doc.setFont(undefined,'normal');
+  doc.setTextColor(120);
+  doc.text(`Erstellt am ${new Date().toLocaleDateString('de-DE')}`, 14, 20);
+
+  const head = [['Mitarbeiter', ...Array.from({length:nDays},(_,i)=>String(i+1)), 'Σ']];
+  const body = state.employees.map(emp=>{
+    let total = 0;
+    const row = [emp.name];
+    for(let d=1; d<=nDays; d++){
+      const entry = state.shifts[emp.id+'|'+fmtKey(y,m,d)];
+      let cellLabel = '';
+      if(entry){
+        total += calcHours(entry);
+        if(entry.type==='tag') cellLabel='T';
+        else if(entry.type==='spaet') cellLabel='S';
+        else if(entry.type==='nacht') cellLabel='N';
+        else if(entry.type==='urlaub') cellLabel='U';
+        else if(entry.type==='krank') cellLabel='K';
+        else if(entry.type==='frei') cellLabel='-';
+        else if(entry.type==='custom') cellLabel = shortTime(entry.start);
+      }
+      row.push(cellLabel);
+    }
+    row.push(String(total));
+    return row;
+  });
+
+  doc.autoTable({
+    head, body,
+    startY: 25,
+    theme: 'grid',
+    styles: { fontSize: 6.5, cellPadding: 1.2, halign:'center', valign:'middle' },
+    headStyles: { fillColor: [30,34,41], textColor: 255, fontSize: 6.5 },
+    columnStyles: { 0: { halign:'left', cellWidth: 28, fontStyle:'bold' } },
+    didParseCell: function(data){
+      if(data.section==='body'){
+        const wd = data.column.index>=1 && data.column.index<=nDays ? new Date(y,m,data.column.index).getDay() : null;
+        if(wd===0||wd===6) data.cell.styles.fillColor = [245,245,245];
+      }
+    }
+  });
+
+  let finalY = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(9);
+  doc.setTextColor(0);
+  doc.setFont(undefined,'bold');
+  doc.text('Legende: T = Tag (07–19)   S = Spät (12–22)   N = Nacht (19–07)   U = Urlaub   K = Krank   - = Frei', 14, finalY);
+
+  finalY += 10;
+  doc.text('Gesamtstunden je Mitarbeiter', 14, finalY);
+  doc.setFont(undefined,'normal');
+  let ly = finalY + 6;
+  state.employees.forEach(emp=>{
+    let total = 0;
+    for(let d=1; d<=nDays; d++){
+      total += calcHours(state.shifts[emp.id+'|'+fmtKey(y,m,d)]);
+    }
+    doc.text(`${emp.name}: ${total} Std.`, 14, ly);
+    ly += 5;
+  });
+
+  doc.save(`Dienstplan_${MONTHNAMES[m]}_${y}.pdf`);
+}
+
+/* ---------- Init ---------- */
+render();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

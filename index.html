@@ -457,9 +457,21 @@ function exportPDF(){
   doc.text(`Erstellt am ${new Date().toLocaleDateString('de-DE')}`, 14, 20);
 
   const head = [['Mitarbeiter', ...Array.from({length:nDays},(_,i)=>String(i+1)), 'Σ']];
+  const PDF_COLORS = {
+    tag:    { bg:[76,159,232],  text:[20,23,28] },
+    spaet:  { bg:[201,107,216], text:[20,23,28] },
+    nacht:  { bg:[122,90,38],   text:[255,255,255] },
+    urlaub: { bg:[76,175,125],  text:[20,23,28] },
+    krank:  { bg:[217,83,79],   text:[255,255,255] },
+    frei:   { bg:[58,64,72],    text:[255,255,255] },
+    custom: { bg:[232,163,61],  text:[20,23,28] }
+  };
+
+  const typeGrid = []; // typeGrid[rowIndex][dayIndex-1] = shift type or null
   const body = state.employees.map(emp=>{
     let total = 0;
     const row = [emp.name];
+    const typeRow = [];
     for(let d=1; d<=nDays; d++){
       const entry = state.shifts[emp.id+'|'+fmtKey(y,m,d)];
       let cellLabel = '';
@@ -474,7 +486,9 @@ function exportPDF(){
         else if(entry.type==='custom') cellLabel = shortTime(entry.start);
       }
       row.push(cellLabel);
+      typeRow.push(entry ? entry.type : null);
     }
+    typeGrid.push(typeRow);
     row.push(String(total));
     return row;
   });
@@ -488,19 +502,46 @@ function exportPDF(){
     columnStyles: { 0: { halign:'left', cellWidth: 28, fontStyle:'bold' } },
     didParseCell: function(data){
       if(data.section==='body'){
-        const wd = data.column.index>=1 && data.column.index<=nDays ? new Date(y,m,data.column.index).getDay() : null;
-        if(wd===0||wd===6) data.cell.styles.fillColor = [245,245,245];
+        const isDayCol = data.column.index>=1 && data.column.index<=nDays;
+        if(isDayCol){
+          const type = typeGrid[data.row.index] ? typeGrid[data.row.index][data.column.index-1] : null;
+          if(type && PDF_COLORS[type]){
+            data.cell.styles.fillColor = PDF_COLORS[type].bg;
+            data.cell.styles.textColor = PDF_COLORS[type].text;
+            data.cell.styles.fontStyle = 'bold';
+          } else {
+            const wd = new Date(y,m,data.column.index).getDay();
+            if(wd===0||wd===6) data.cell.styles.fillColor = [238,238,238];
+          }
+        }
       }
     }
   });
 
-  let finalY = doc.lastAutoTable.finalY + 8;
+  let finalY = doc.lastAutoTable.finalY + 9;
   doc.setFontSize(9);
   doc.setTextColor(0);
   doc.setFont(undefined,'bold');
-  doc.text('Legende: T = Tag (07–19)   S = Spät (12–22)   N = Nacht (19–07)   U = Urlaub   K = Krank   - = Frei', 14, finalY);
+  doc.text('Legende', 14, finalY);
+  doc.setFont(undefined,'normal');
 
-  finalY += 10;
+  const legendItems = [
+    ['tag','Tag 07–19'], ['spaet','Spät 12–22'], ['nacht','Nacht 19–07'],
+    ['urlaub','Urlaub'], ['krank','Krank'], ['frei','Frei']
+  ];
+  let lx = 14, ly0 = finalY + 5;
+  legendItems.forEach(([key,label])=>{
+    const c = PDF_COLORS[key].bg;
+    doc.setFillColor(c[0],c[1],c[2]);
+    doc.rect(lx, ly0-3, 4, 4, 'F');
+    doc.setFontSize(8);
+    doc.text(label, lx+6, ly0);
+    lx += doc.getTextWidth(label) + 16;
+  });
+
+  finalY = ly0 + 10;
+  doc.setFontSize(9);
+  doc.setFont(undefined,'bold');
   doc.text('Gesamtstunden je Mitarbeiter', 14, finalY);
   doc.setFont(undefined,'normal');
   let ly = finalY + 6;

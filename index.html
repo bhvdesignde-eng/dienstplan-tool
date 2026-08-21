@@ -113,6 +113,18 @@
     font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
     color:var(--amber); margin:24px 0 10px; padding-top:16px; border-top:1px solid var(--line);
   }
+  .objday{
+    display:flex; align-items:flex-start; gap:10px; padding:9px 0; border-bottom:1px solid var(--line);
+  }
+  .objday .d{
+    font-family:var(--mono); font-size:12px; color:var(--ink-dim); min-width:46px; padding-top:1px;
+  }
+  .objday .who{flex:1; font-size:13px; line-height:1.5;}
+  .objday .who .tag{
+    display:inline-block; background:var(--panel2); border:1px solid var(--line); border-radius:6px;
+    padding:2px 7px; margin:2px 4px 2px 0; font-size:12px;
+  }
+  .objday.empty .who{color:var(--ink-dim);}
 
   /* BOTTOM ACTIONBAR */
   .actionbar{
@@ -176,8 +188,9 @@
   </div>
   <div class="tabs">
     <div class="tab active" data-tab="plan" onclick="showTab('plan')">Plan</div>
-    <div class="tab" data-tab="team" onclick="showTab('team')">Mitarbeiter</div>
-    <div class="tab" data-tab="summary" onclick="showTab('summary')">Stunden</div>
+    <div class="tab" data-tab="team" onclick="showTab('team')">Team</div>
+    <div class="tab" data-tab="objekt" onclick="showTab('objekt')">Objekt</div>
+    <div class="tab" data-tab="summary" onclick="showTab('summary')">Std.</div>
     <div class="tab" data-tab="firma" onclick="showTab('firma')">Firma</div>
   </div>
 </header>
@@ -206,6 +219,16 @@
       <button onclick="addObjekt()">+</button>
     </div>
     <div class="hint">Objekte hinterlegen, um sie später einer Schicht zuzuordnen (erscheint auf dem PDF).</div>
+  </section>
+
+  <section id="tab-objekt">
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <select id="objektViewSelect" onchange="renderObjektView()" style="width:100%; background:var(--panel); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:12px; font-size:14px;">
+        <option value="">Objekt wählen…</option>
+      </select>
+    </div>
+    <div id="objektViewList" style="margin-top:14px;"></div>
+    <div class="hint">Zeigt für das gewählte Objekt, welcher Mitarbeiter an welchem Tag im Monat dort eingeteilt ist — praktisch für Rückfragen am Telefon.</div>
   </section>
 
   <section id="tab-summary">
@@ -269,10 +292,10 @@
       <input type="time" id="customEnd" value="16:00">
       <button class="btn-primary" style="border-radius:8px;padding:10px 14px;" onclick="applyCustom()">OK</button>
     </div>
-    <div id="objektRow" style="margin-top:12px; display:none;">
-      <select id="objektSelect" style="width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:10px 12px; font-size:14px;">
-        <option value="">Kein Objekt</option>
-      </select>
+    <div id="objektRow" style="margin-top:12px;">
+      <input type="text" id="objektInput" list="objektDatalist" placeholder="Objekt / Standort (optional)"
+        style="width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:10px 12px; font-size:14px;">
+      <datalist id="objektDatalist"></datalist>
     </div>
     <div class="sheet-actions">
       <button class="clearbtn" onclick="clearCell()">Löschen</button>
@@ -347,6 +370,7 @@ function render(){
   renderLegend();
   renderTeam();
   renderObjekte();
+  renderObjektView();
   renderSummary();
   renderCompany();
   saveState();
@@ -369,28 +393,76 @@ function updateCompany(){
 
 function renderObjekte(){
   const el = document.getElementById('objList');
-  el.innerHTML = (state.objects||[]).map(o=>`
+  el.innerHTML = (state.objects||[]).map(name=>`
     <div class="empcard">
       <span class="swatch" style="background:var(--panel2); border:1px solid var(--line);"></span>
-      <span class="name">${escapeHtml(o.name)}</span>
-      <span class="del" onclick="removeObjekt('${o.id}')">Entfernen</span>
+      <span class="name">${escapeHtml(name)}</span>
+      <span class="del" onclick="removeObjekt('${name.replace(/'/g,"\\'")}')">Entfernen</span>
     </div>
   `).join('') || '<div class="hint" style="margin-top:0;">Noch keine Objekte hinterlegt.</div>';
+
+  // Datalist im Sheet + Select in der Objekt-Ansicht befüllen
+  const datalist = document.getElementById('objektDatalist');
+  if(datalist) datalist.innerHTML = (state.objects||[]).map(n=>`<option value="${escapeHtml(n)}">`).join('');
+
+  const viewSelect = document.getElementById('objektViewSelect');
+  if(viewSelect){
+    const prevVal = viewSelect.value;
+    viewSelect.innerHTML = '<option value="">Objekt wählen…</option>' +
+      (state.objects||[]).map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    if(state.objects.includes(prevVal)) viewSelect.value = prevVal;
+  }
+}
+
+function addObjektName(name){
+  name = name.trim();
+  if(!name) return;
+  if(!state.objects) state.objects = [];
+  const exists = state.objects.some(o=>o.toLowerCase()===name.toLowerCase());
+  if(!exists){
+    state.objects.push(name);
+    state.objects.sort((a,b)=>a.localeCompare(b,'de'));
+  }
 }
 
 function addObjekt(){
   const el = document.getElementById('newObjekt');
-  const name = el.value.trim();
-  if(!name) return;
-  if(!state.objects) state.objects = [];
-  state.objects.push({id: uid(), name});
+  addObjektName(el.value);
   el.value = '';
   render();
 }
 
-function removeObjekt(id){
-  state.objects = state.objects.filter(o=>o.id!==id);
+function removeObjekt(name){
+  state.objects = (state.objects||[]).filter(o=>o!==name);
   render();
+}
+
+function renderObjektView(){
+  const sel = document.getElementById('objektViewSelect');
+  const list = document.getElementById('objektViewList');
+  const chosen = sel ? sel.value : '';
+  if(!chosen){ list.innerHTML = ''; return; }
+
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const nDays = daysInMonth(cur);
+  let html = '';
+  for(let d=1; d<=nDays; d++){
+    const dateObj = new Date(y,m,d);
+    const dayLabel = `${d}. ${WD[dateObj.getDay()]}`;
+    const matches = [];
+    state.employees.forEach(emp=>{
+      const entry = state.shifts[emp.id+'|'+fmtKey(y,m,d)];
+      if(entry && entry.objekt && entry.objekt.toLowerCase() === chosen.toLowerCase()){
+        const preset = PRESETS[entry.type] || {};
+        matches.push(`<span class="tag">${escapeHtml(emp.name)} · ${preset.label||entry.type}</span>`);
+      }
+    });
+    html += `<div class="objday ${matches.length?'':'empty'}">
+      <div class="d">${dayLabel}</div>
+      <div class="who">${matches.length ? matches.join('') : '—'}</div>
+    </div>`;
+  }
+  list.innerHTML = html;
 }
 
 function renderPlan(){
@@ -510,24 +582,17 @@ function openSheet(empId, y, m, d){
     </div>`).join('');
   document.getElementById('customRow').style.display = 'none';
 
-  const objRow = document.getElementById('objektRow');
-  const objSelect = document.getElementById('objektSelect');
-  if(state.objects && state.objects.length){
-    const existing = state.shifts[activeCell.key];
-    objSelect.innerHTML = '<option value="">Kein Objekt</option>' +
-      state.objects.map(o=>`<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
-    objSelect.value = existing && existing.objekt ? existing.objekt : '';
-    objRow.style.display = 'block';
-  } else {
-    objRow.style.display = 'none';
-  }
+  const objInput = document.getElementById('objektInput');
+  const existing = state.shifts[activeCell.key];
+  objInput.value = existing && existing.objekt ? existing.objekt : '';
 
   document.getElementById('overlay').classList.add('show');
 }
 
-function currentObjektId(){
-  const objSelect = document.getElementById('objektSelect');
-  return (state.objects && state.objects.length && objSelect.value) ? objSelect.value : null;
+function currentObjektValue(){
+  const v = document.getElementById('objektInput').value.trim();
+  if(v) addObjektName(v); // neuen Objektnamen für künftige Autovervollständigung merken
+  return v || null;
 }
 
 function pickPreset(key){
@@ -536,7 +601,7 @@ function pickPreset(key){
     return;
   }
   const p = PRESETS[key];
-  state.shifts[activeCell.key] = {type:key, start:p.start, end:p.end, hours: p.hours, objekt: currentObjektId()};
+  state.shifts[activeCell.key] = {type:key, start:p.start, end:p.end, hours: p.hours, objekt: currentObjektValue()};
   closeSheet();
   render();
 }
@@ -544,7 +609,7 @@ function pickPreset(key){
 function applyCustom(){
   const start = document.getElementById('customStart').value;
   const end = document.getElementById('customEnd').value;
-  state.shifts[activeCell.key] = {type:'custom', start, end, objekt: currentObjektId()};
+  state.shifts[activeCell.key] = {type:'custom', start, end, objekt: currentObjektValue()};
   closeSheet();
   render();
 }
@@ -744,8 +809,8 @@ function exportIndividualPDFs(){
         if(entry){
           schicht = TYPE_LABEL[entry.type] || entry.type;
           zeit = (entry.start && entry.end) ? `${entry.start}–${entry.end}` : '';
-          const obj = entry.objekt ? state.objects.find(o=>o.id===entry.objekt) : null;
-          objekt = obj ? obj.name : '';
+          const obj = entry.objekt || '';
+          objekt = obj;
           const h = calcHours(entry);
           hrs = h ? String(h) : '';
           total += h;

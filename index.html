@@ -328,13 +328,15 @@ function uid(){ return 'e'+Math.random().toString(36).slice(2,9); }
 
 /* ---------- Schicht-Presets ---------- */
 const PRESETS = {
-  tag:    {label:'Tag',    time:'07–19', start:'07:00', end:'19:00', color:'#4c9fe8'},
-  spaet:  {label:'Spät',   time:'12–22', start:'12:00', end:'22:00', color:'#c96bd8'},
-  nacht:  {label:'Nacht',  time:'19–07', start:'19:00', end:'07:00', color:'#7a5a26'},
-  urlaub: {label:'Urlaub', time:'—',     start:null,    end:null,    color:'#4caf7d', hours:0},
-  frei:   {label:'Frei',   time:'—',     start:null,    end:null,    color:'#3a4048', hours:0},
-  krank:  {label:'Krank',  time:'—',     start:null,    end:null,    color:'#d9534f', hours:0},
-  custom: {label:'Zeit…',  time:'frei wählbar', color:'#e8a33d'}
+  tag:     {label:'Tag',      time:'07–19', start:'07:00', end:'19:00', color:'#4c9fe8'},
+  spaet:   {label:'Spät',     time:'12–22', start:'12:00', end:'22:00', color:'#c96bd8'},
+  nacht:   {label:'Nacht',    time:'19–07', start:'19:00', end:'07:00', color:'#7a5a26'},
+  nacht20: {label:'Nacht 20', time:'20–07', start:'20:00', end:'07:00', color:'#96742f'},
+  nacht22: {label:'Nacht 22', time:'22–07', start:'22:00', end:'07:00', color:'#5e461d'},
+  urlaub:  {label:'Urlaub',   time:'—',     start:null,    end:null,    color:'#4caf7d', hours:0},
+  frei:    {label:'Frei',     time:'—',     start:null,    end:null,    color:'#3a4048', hours:0},
+  krank:   {label:'Krank',    time:'—',     start:null,    end:null,    color:'#d9534f', hours:0},
+  custom:  {label:'Zeit…',    time:'frei wählbar', color:'#e8a33d'}
 };
 
 /* ---------- Zeit / Kalender ---------- */
@@ -497,6 +499,8 @@ function renderPlan(){
         if(entry.type==='tag') label='T';
         if(entry.type==='spaet') label='S';
         if(entry.type==='nacht') label='N';
+        if(entry.type==='nacht20') label='N20';
+        if(entry.type==='nacht22') label='N22';
         if(entry.type==='urlaub') label='U';
         if(entry.type==='krank') label='K';
         if(entry.type==='frei') label='—';
@@ -536,6 +540,8 @@ function renderTeam(){
           <option value="tag" ${emp.fixedShift==='tag'?'selected':''}>Tag (07–19)</option>
           <option value="spaet" ${emp.fixedShift==='spaet'?'selected':''}>Spät (12–22)</option>
           <option value="nacht" ${emp.fixedShift==='nacht'?'selected':''}>Nacht (19–07)</option>
+          <option value="nacht20" ${emp.fixedShift==='nacht20'?'selected':''}>Nacht (20–07)</option>
+          <option value="nacht22" ${emp.fixedShift==='nacht22'?'selected':''}>Nacht (22–07)</option>
         </select>
       </div>
       <div style="flex-basis:100%; margin-top:6px; display:flex; align-items:center; gap:8px;">
@@ -734,13 +740,15 @@ function exportTeamPDF(){
 
   const head = [['Mitarbeiter', ...Array.from({length:nDays},(_,i)=>String(i+1)), 'Σ']];
   const PDF_COLORS = {
-    tag:    { bg:[76,159,232],  text:[20,23,28] },
-    spaet:  { bg:[201,107,216], text:[20,23,28] },
-    nacht:  { bg:[122,90,38],   text:[255,255,255] },
-    urlaub: { bg:[76,175,125],  text:[20,23,28] },
-    krank:  { bg:[217,83,79],   text:[255,255,255] },
-    frei:   { bg:[58,64,72],    text:[255,255,255] },
-    custom: { bg:[232,163,61],  text:[20,23,28] }
+    tag:     { bg:[76,159,232],  text:[20,23,28] },
+    spaet:   { bg:[201,107,216], text:[20,23,28] },
+    nacht:   { bg:[122,90,38],   text:[255,255,255] },
+    nacht20: { bg:[150,116,47],  text:[255,255,255] },
+    nacht22: { bg:[94,70,29],    text:[255,255,255] },
+    urlaub:  { bg:[76,175,125],  text:[20,23,28] },
+    krank:   { bg:[217,83,79],   text:[255,255,255] },
+    frei:    { bg:[58,64,72],    text:[255,255,255] },
+    custom:  { bg:[232,163,61],  text:[20,23,28] }
   };
 
   const typeGrid = []; // typeGrid[rowIndex][dayIndex-1] = shift type or null
@@ -756,6 +764,8 @@ function exportTeamPDF(){
         if(entry.type==='tag') cellLabel='T';
         else if(entry.type==='spaet') cellLabel='S';
         else if(entry.type==='nacht') cellLabel='N';
+        else if(entry.type==='nacht20') cellLabel='N20';
+        else if(entry.type==='nacht22') cellLabel='N22';
         else if(entry.type==='urlaub') cellLabel='U';
         else if(entry.type==='krank') cellLabel='K';
         else if(entry.type==='frei') cellLabel='-';
@@ -803,6 +813,7 @@ function exportTeamPDF(){
 
   const legendItems = [
     ['tag','Tag 07–19'], ['spaet','Spät 12–22'], ['nacht','Nacht 19–07'],
+    ['nacht20','Nacht 20–07'], ['nacht22','Nacht 22–07'],
     ['urlaub','Urlaub'], ['krank','Krank'], ['frei','Frei']
   ];
   let lx = 14, ly0 = finalY + 5;
@@ -842,11 +853,11 @@ function exportIndividualPDFs(){
   const nDays = daysInMonth(cur);
 
   const TYPE_LABEL = {
-    tag:'Tag', spaet:'Spät', nacht:'Nacht',
+    tag:'Tag', spaet:'Spät', nacht:'Nacht', nacht20:'Nacht 20–07', nacht22:'Nacht 22–07',
     urlaub:'Urlaub', krank:'Krank', frei:'Frei', custom:'Individuell'
   };
   const PDF_COLORS = {
-    tag:[76,159,232], spaet:[201,107,216], nacht:[122,90,38],
+    tag:[76,159,232], spaet:[201,107,216], nacht:[122,90,38], nacht20:[150,116,47], nacht22:[94,70,29],
     urlaub:[76,175,125], krank:[217,83,79], frei:[58,64,72], custom:[232,163,61]
   };
 
@@ -915,7 +926,7 @@ function exportIndividualPDFs(){
             if(entry && PDF_COLORS[entry.type]){
               const c = PDF_COLORS[entry.type];
               data.cell.styles.fillColor = c;
-              data.cell.styles.textColor = (entry.type==='nacht'||entry.type==='krank') ? [255,255,255] : [20,23,28];
+              data.cell.styles.textColor = (entry.type==='nacht'||entry.type==='nacht20'||entry.type==='nacht22'||entry.type==='krank') ? [255,255,255] : [20,23,28];
               data.cell.styles.fontStyle = 'bold';
             } else if(wd===0||wd===6){
               data.cell.styles.fillColor = [246,246,246];

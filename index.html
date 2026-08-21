@@ -530,16 +530,31 @@ function renderTeam(){
       <span class="name">${escapeHtml(emp.name)}</span>
       <span class="del" onclick="removeEmployee('${emp.id}')">Entfernen</span>
       <div style="flex-basis:100%; margin-top:8px; display:flex; align-items:center; gap:8px;">
-        <span style="font-size:11px; color:var(--ink-dim);">Feste Schicht (Mo–Fr):</span>
-        <select onchange="setFixedShift('${emp.id}', this.value)" style="background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:5px 8px; font-size:12px;">
+        <span style="font-size:11px; color:var(--ink-dim); min-width:112px;">Feste Schicht (Mo–Fr):</span>
+        <select onchange="setFixedShift('${emp.id}', this.value)" style="background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:5px 8px; font-size:12px; flex:1;">
           <option value="" ${!emp.fixedShift?'selected':''}>Keine (rotierend)</option>
           <option value="tag" ${emp.fixedShift==='tag'?'selected':''}>Tag (07–19)</option>
           <option value="spaet" ${emp.fixedShift==='spaet'?'selected':''}>Spät (12–22)</option>
           <option value="nacht" ${emp.fixedShift==='nacht'?'selected':''}>Nacht (19–07)</option>
         </select>
       </div>
+      <div style="flex-basis:100%; margin-top:6px; display:flex; align-items:center; gap:8px;">
+        <span style="font-size:11px; color:var(--ink-dim); min-width:112px;">Festes Objekt:</span>
+        <input type="text" list="objektDatalist" value="${escapeHtml(emp.fixedObjekt||'')}"
+          placeholder="z. B. Kunde XY"
+          onchange="setFixedObjekt('${emp.id}', this.value)"
+          style="background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:5px 8px; font-size:12px; flex:1;">
+      </div>
     </div>
   `).join('') || '<div class="hint">Noch keine Mitarbeiter angelegt.</div>';
+}
+
+function setFixedObjekt(id, value){
+  const emp = state.employees.find(e=>e.id===id);
+  const name = value.trim();
+  if(emp) emp.fixedObjekt = name || null;
+  if(name) addObjektName(name);
+  render();
 }
 
 function setFixedShift(id, value){
@@ -583,7 +598,7 @@ function autofillFixedShifts(){
       const wd = new Date(y,m,d).getDay();
       const isWeekday = (wd>=1 && wd<=5);
       if(isWeekday){
-        state.shifts[key] = {type: emp.fixedShift, start:p.start, end:p.end, hours:p.hours, objekt:null};
+        state.shifts[key] = {type: emp.fixedShift, start:p.start, end:p.end, hours:p.hours, objekt: emp.fixedObjekt || null};
       } else {
         state.shifts[key] = {type:'frei', start:null, end:null, hours:0, objekt:null};
       }
@@ -631,7 +646,7 @@ function openSheet(empId, y, m, d){
 
   const objInput = document.getElementById('objektInput');
   const existing = state.shifts[activeCell.key];
-  objInput.value = existing && existing.objekt ? existing.objekt : '';
+  objInput.value = existing && existing.objekt ? existing.objekt : (emp.fixedObjekt || '');
 
   document.getElementById('overlay').classList.add('show');
 }

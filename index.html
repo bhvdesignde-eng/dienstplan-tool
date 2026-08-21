@@ -198,6 +198,9 @@
 <main>
   <section id="tab-plan" class="active">
     <div id="emptyPlanHint" class="hint" style="display:none; margin-bottom:10px;">Noch keine Mitarbeiter angelegt. Unter „Mitarbeiter" zuerst das Team eintragen.</div>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+      <button onclick="autofillFixedShifts()" style="background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:9px 14px; font-size:12.5px; font-weight:600;">🔁 Feste Schichten automatisch füllen</button>
+    </div>
     <div class="gridwrap"><table class="plan" id="planTable"></table></div>
     <div class="legend" id="legend"></div>
     <div class="hint">Zelle antippen, um eine Schicht zuzuweisen. Nach rechts scrollen für weitere Tage.</div>
@@ -522,12 +525,27 @@ function renderLegend(){
 function renderTeam(){
   const el = document.getElementById('empList');
   el.innerHTML = state.employees.map(emp=>`
-    <div class="empcard">
+    <div class="empcard" style="flex-wrap:wrap;">
       <span class="swatch" style="background:${emp.color}"></span>
       <span class="name">${escapeHtml(emp.name)}</span>
       <span class="del" onclick="removeEmployee('${emp.id}')">Entfernen</span>
+      <div style="flex-basis:100%; margin-top:8px; display:flex; align-items:center; gap:8px;">
+        <span style="font-size:11px; color:var(--ink-dim);">Feste Schicht (Mo–Fr):</span>
+        <select onchange="setFixedShift('${emp.id}', this.value)" style="background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:5px 8px; font-size:12px;">
+          <option value="" ${!emp.fixedShift?'selected':''}>Keine (rotierend)</option>
+          <option value="tag" ${emp.fixedShift==='tag'?'selected':''}>Tag (07–19)</option>
+          <option value="spaet" ${emp.fixedShift==='spaet'?'selected':''}>Spät (12–22)</option>
+          <option value="nacht" ${emp.fixedShift==='nacht'?'selected':''}>Nacht (19–07)</option>
+        </select>
+      </div>
     </div>
   `).join('') || '<div class="hint">Noch keine Mitarbeiter angelegt.</div>';
+}
+
+function setFixedShift(id, value){
+  const emp = state.employees.find(e=>e.id===id);
+  if(emp) emp.fixedShift = value || null;
+  saveState();
 }
 
 function addEmployee(){
@@ -535,7 +553,7 @@ function addEmployee(){
   const colorEl = document.getElementById('newColor');
   const name = nameEl.value.trim();
   if(!name) return;
-  state.employees.push({id: uid(), name, color: colorEl.value});
+  state.employees.push({id: uid(), name, color: colorEl.value, fixedShift: null});
   nameEl.value = '';
   render();
 }
@@ -545,6 +563,35 @@ function removeEmployee(id){
   state.employees = state.employees.filter(e=>e.id!==id);
   Object.keys(state.shifts).forEach(k=>{ if(k.startsWith(id+'|')) delete state.shifts[k]; });
   render();
+}
+
+/* ---------- Automatisch ausfüllen (feste Schichten) ---------- */
+function autofillFixedShifts(){
+  const fixedEmps = state.employees.filter(e=>e.fixedShift);
+  if(!fixedEmps.length){
+    alert('Noch keinem Mitarbeiter ist eine feste Schicht zugeordnet. Das kannst du im Tab "Team" einstellen.');
+    return;
+  }
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const nDays = daysInMonth(cur);
+  let filled = 0;
+  fixedEmps.forEach(emp=>{
+    const p = PRESETS[emp.fixedShift];
+    for(let d=1; d<=nDays; d++){
+      const key = emp.id+'|'+fmtKey(y,m,d);
+      if(state.shifts[key]) continue; // bestehende Einträge (Urlaub, Krank, manuell...) nie überschreiben
+      const wd = new Date(y,m,d).getDay();
+      const isWeekday = (wd>=1 && wd<=5);
+      if(isWeekday){
+        state.shifts[key] = {type: emp.fixedShift, start:p.start, end:p.end, hours:p.hours, objekt:null};
+      } else {
+        state.shifts[key] = {type:'frei', start:null, end:null, hours:0, objekt:null};
+      }
+      filled++;
+    }
+  });
+  render();
+  alert(`${filled} Tage automatisch eingetragen (Mo–Fr feste Schicht, Wochenende frei). Bereits vorhandene Einträge wurden nicht verändert.`);
 }
 
 /* ---------- Render: Stunden-Tab ---------- */
@@ -780,7 +827,7 @@ function exportIndividualPDFs(){
   const nDays = daysInMonth(cur);
 
   const TYPE_LABEL = {
-    tag:'Tag (07–19)', spaet:'Spät (12–22)', nacht:'Nacht (19–07)',
+    tag:'Tag', spaet:'Spät', nacht:'Nacht',
     urlaub:'Urlaub', krank:'Krank', frei:'Frei', custom:'Individuell'
   };
   const PDF_COLORS = {
@@ -791,14 +838,32 @@ function exportIndividualPDFs(){
   state.employees.forEach((emp, idx)=>{
     setTimeout(()=>{
       const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
-      const startY = pdfHeader(doc, `Dienstplan – ${MONTHNAMES[m]} ${y}`);
+      const compName = (state.company && state.company.name) ? state.company.name : '';
+      const compAddr = (state.company && state.company.address) ? state.company.address : '';
 
-      doc.setFontSize(11);
+      // Schlanker, kompakter Kopf
+      let hy = 14;
+      if(compName){
+        doc.setFontSize(9);
+        doc.setFont(undefined,'bold');
+        doc.setTextColor(90);
+        doc.text(compName + (compAddr ? '  ·  ' + compAddr : ''), 14, hy);
+        hy += 6;
+      }
+      doc.setFontSize(16);
       doc.setFont(undefined,'bold');
       doc.setTextColor(0);
-      doc.text(`Mitarbeiter: ${emp.name}`, 14, startY + 4);
+      doc.text(`Dienstplan ${MONTHNAMES[m]} ${y}`, 14, hy);
+      doc.setFontSize(11);
+      doc.setFont(undefined,'normal');
+      doc.setTextColor(90);
+      doc.text(emp.name, 14, hy + 6);
+      doc.setFontSize(7.5);
+      doc.setTextColor(150);
+      doc.text(`Erstellt am ${new Date().toLocaleDateString('de-DE')}`, 14, hy + 11);
+      const tableStartY = hy + 16;
 
-      const head = [['Tag', 'Datum', 'Schicht', 'Zeit', 'Objekt', 'Std.']];
+      const head = [['Datum', 'Schicht', 'Zeit', 'Objekt', 'Std.']];
       const body = [];
       let total = 0;
       for(let d=1; d<=nDays; d++){
@@ -809,49 +874,50 @@ function exportIndividualPDFs(){
         if(entry){
           schicht = TYPE_LABEL[entry.type] || entry.type;
           zeit = (entry.start && entry.end) ? `${entry.start}–${entry.end}` : '';
-          const obj = entry.objekt || '';
-          objekt = obj;
+          objekt = entry.objekt || '';
           const h = calcHours(entry);
           hrs = h ? String(h) : '';
           total += h;
         }
-        body.push([String(d), wd, schicht, zeit, objekt, hrs]);
+        body.push([`${String(d).padStart(2,'0')}. ${wd}`, schicht, zeit, objekt, hrs]);
       }
 
       doc.autoTable({
         head, body,
-        startY: startY + 10,
+        startY: tableStartY,
         theme: 'grid',
-        styles: { fontSize: 8.5, cellPadding: 2.2 },
-        headStyles: { fillColor: [30,34,41], textColor: 255 },
-        columnStyles: { 0:{cellWidth:10, halign:'center'}, 1:{cellWidth:14}, 5:{cellWidth:14, halign:'center'} },
+        styles: { fontSize: 8, cellPadding: {top:1.1, bottom:1.1, left:2.5, right:2.5}, lineColor:[225,225,225], lineWidth:0.1 },
+        headStyles: { fillColor: [30,34,41], textColor: 255, fontSize: 8, cellPadding:{top:1.6,bottom:1.6,left:2.5,right:2.5} },
+        columnStyles: {
+          0:{cellWidth:22}, 1:{cellWidth:24}, 2:{cellWidth:28},
+          4:{cellWidth:16, halign:'center'}
+        },
+        margin: {left:14, right:14, bottom:16},
         didParseCell: function(data){
-          if(data.section==='body' && data.column.index===2){
-            const dateObj = new Date(y,m,data.row.index+1);
-            const wd = dateObj.getDay();
+          if(data.section==='body' && data.column.index===1){
             const entry = state.shifts[emp.id+'|'+fmtKey(y,m,data.row.index+1)];
+            const wd = new Date(y,m,data.row.index+1).getDay();
             if(entry && PDF_COLORS[entry.type]){
               const c = PDF_COLORS[entry.type];
               data.cell.styles.fillColor = c;
               data.cell.styles.textColor = (entry.type==='nacht'||entry.type==='krank') ? [255,255,255] : [20,23,28];
               data.cell.styles.fontStyle = 'bold';
             } else if(wd===0||wd===6){
-              data.cell.styles.fillColor = [245,245,245];
+              data.cell.styles.fillColor = [246,246,246];
             }
           }
         }
       });
 
-      let finalY = doc.lastAutoTable.finalY + 10;
-      doc.setFontSize(11);
+      const finalY = doc.lastAutoTable.finalY + 7;
+      doc.setFontSize(10.5);
       doc.setFont(undefined,'bold');
       doc.setTextColor(0);
       doc.text(`Gesamtstunden: ${total} Std.`, 14, finalY);
-
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.setFont(undefined,'normal');
-      doc.setTextColor(140);
-      doc.text('Dieser Plan enthält ausschließlich Ihre eigenen Schichten.', 14, finalY + 8);
+      doc.setTextColor(150);
+      doc.text('Dieser Plan enthält ausschließlich Ihre eigenen Schichten.', 14, finalY + 6);
 
       const safeName = emp.name.replace(/[^a-zA-Z0-9äöüÄÖÜß\-_ ]/g,'').replace(/\s+/g,'_');
       doc.save(`Dienstplan_${safeName}_${MONTHNAMES[m]}_${y}.pdf`);

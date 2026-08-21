@@ -109,6 +109,10 @@
   input[type=color]{padding:2px; width:40px; height:40px; cursor:pointer;}
 
   .hint{color:var(--ink-dim); font-size:11.5px; line-height:1.5; margin-top:14px;}
+  .sectionhead{
+    font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
+    color:var(--amber); margin:24px 0 10px; padding-top:16px; border-top:1px solid var(--line);
+  }
 
   /* BOTTOM ACTIONBAR */
   .actionbar{
@@ -174,6 +178,7 @@
     <div class="tab active" data-tab="plan" onclick="showTab('plan')">Plan</div>
     <div class="tab" data-tab="team" onclick="showTab('team')">Mitarbeiter</div>
     <div class="tab" data-tab="summary" onclick="showTab('summary')">Stunden</div>
+    <div class="tab" data-tab="firma" onclick="showTab('firma')">Firma</div>
   </div>
 </header>
 
@@ -193,17 +198,64 @@
       <button onclick="addEmployee()">+</button>
     </div>
     <div class="hint">Mitarbeiter hier anlegen oder entfernen. Die Farbe erscheint im Plan und im PDF.</div>
+
+    <div class="sectionhead">Objekte / Standorte</div>
+    <div class="emplist" id="objList"></div>
+    <div class="addrow">
+      <input type="text" id="newObjekt" placeholder="z. B. Kunde XY, Werksgelände…" style="flex:1;">
+      <button onclick="addObjekt()">+</button>
+    </div>
+    <div class="hint">Objekte hinterlegen, um sie später einer Schicht zuzuordnen (erscheint auf dem PDF).</div>
   </section>
 
   <section id="tab-summary">
     <div class="totrow" id="summaryList"></div>
     <div class="hint">Gesamtstunden pro Mitarbeiter für den ausgewählten Monat, berechnet aus allen eingetragenen Schichten.</div>
   </section>
+
+  <section id="tab-firma">
+    <div class="sectionhead" style="margin-top:0;">Firmendaten</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <input type="text" id="companyName" placeholder="Firmenname" oninput="updateCompany()">
+      <input type="text" id="companyAddress" placeholder="Adresse (optional)" oninput="updateCompany()">
+    </div>
+    <div class="hint">Erscheint als Kopfzeile auf jedem exportierten PDF-Dienstplan.</div>
+
+    <div class="sectionhead">Datenschutz</div>
+    <div class="empcard" style="align-items:flex-start;">
+      <div>
+        <div style="font-weight:600; margin-bottom:4px;">Einzel-PDFs statt Team-Übersicht</div>
+        <div style="color:var(--ink-dim); font-size:12px; line-height:1.5;">
+          Beim PDF-Export kannst du wählen: eine Team-Übersicht (alle Mitarbeiter auf einem Blatt, für dich als Chef) oder Einzel-Dienstpläne — jeder Mitarbeiter bekommt nur sein eigenes Blatt, ohne Schichten der Kollegen zu sehen.
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <div class="actionbar">
-  <button class="btn-ghost" onclick="exportPDF()">📄 PDF exportieren</button>
+  <button class="btn-ghost" onclick="openPdfSheet()">📄 PDF exportieren</button>
   <button class="btn-primary" onclick="showTab('team')">👤 Mitarbeiter</button>
+</div>
+
+<div class="overlay" id="pdfOverlay" onclick="if(event.target===this) closePdfSheet()">
+  <div class="sheet">
+    <h3>PDF exportieren</h3>
+    <div class="meta">Wähle die passende Ausgabe</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <button class="btn-primary" style="padding:14px; border-radius:9px; text-align:left;" onclick="exportTeamPDF()">
+        <div style="font-weight:700;">Team-Übersicht</div>
+        <div style="font-size:11.5px; font-weight:500; opacity:.8;">Alle Mitarbeiter auf einem Blatt — für dich als Chef</div>
+      </button>
+      <button class="btn-ghost" style="padding:14px; border-radius:9px; text-align:left; border:1px solid var(--line) !important;" onclick="exportIndividualPDFs()">
+        <div style="font-weight:700;">Einzel-Dienstpläne</div>
+        <div style="font-size:11.5px; font-weight:500; color:var(--ink-dim);">Ein PDF je Mitarbeiter, ohne Kollegen-Schichten sichtbar</div>
+      </button>
+    </div>
+    <div class="sheet-actions">
+      <button class="closebtn" onclick="closePdfSheet()">Schließen</button>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="overlay" onclick="if(event.target===this) closeSheet()">
@@ -216,6 +268,11 @@
       <span style="color:var(--ink-dim)">–</span>
       <input type="time" id="customEnd" value="16:00">
       <button class="btn-primary" style="border-radius:8px;padding:10px 14px;" onclick="applyCustom()">OK</button>
+    </div>
+    <div id="objektRow" style="margin-top:12px; display:none;">
+      <select id="objektSelect" style="width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:10px 12px; font-size:14px;">
+        <option value="">Kein Objekt</option>
+      </select>
     </div>
     <div class="sheet-actions">
       <button class="clearbtn" onclick="clearCell()">Löschen</button>
@@ -234,7 +291,9 @@ function loadState(){
   if(raw){ try{ return JSON.parse(raw); }catch(e){} }
   return {
     employees: [],
-    shifts: {}, // key: empId|YYYY-MM-DD -> {type, start, end, hours}
+    objects: [], // {id, name}
+    company: { name: '', address: '' },
+    shifts: {}, // key: empId|YYYY-MM-DD -> {type, start, end, hours, objekt}
     teamLabel: 'Team-Übersicht'
   };
 }
@@ -287,8 +346,51 @@ function render(){
   renderPlan();
   renderLegend();
   renderTeam();
+  renderObjekte();
   renderSummary();
+  renderCompany();
   saveState();
+}
+
+function renderCompany(){
+  if(!state.company) state.company = {name:'', address:''};
+  const nameEl = document.getElementById('companyName');
+  const addrEl = document.getElementById('companyAddress');
+  if(document.activeElement !== nameEl) nameEl.value = state.company.name || '';
+  if(document.activeElement !== addrEl) addrEl.value = state.company.address || '';
+}
+function updateCompany(){
+  state.company = {
+    name: document.getElementById('companyName').value,
+    address: document.getElementById('companyAddress').value
+  };
+  saveState();
+}
+
+function renderObjekte(){
+  const el = document.getElementById('objList');
+  el.innerHTML = (state.objects||[]).map(o=>`
+    <div class="empcard">
+      <span class="swatch" style="background:var(--panel2); border:1px solid var(--line);"></span>
+      <span class="name">${escapeHtml(o.name)}</span>
+      <span class="del" onclick="removeObjekt('${o.id}')">Entfernen</span>
+    </div>
+  `).join('') || '<div class="hint" style="margin-top:0;">Noch keine Objekte hinterlegt.</div>';
+}
+
+function addObjekt(){
+  const el = document.getElementById('newObjekt');
+  const name = el.value.trim();
+  if(!name) return;
+  if(!state.objects) state.objects = [];
+  state.objects.push({id: uid(), name});
+  el.value = '';
+  render();
+}
+
+function removeObjekt(id){
+  state.objects = state.objects.filter(o=>o.id!==id);
+  render();
 }
 
 function renderPlan(){
@@ -407,7 +509,25 @@ function openSheet(empId, y, m, d){
       <span class="lbl">${p.label}</span><span class="time">${p.time}</span>
     </div>`).join('');
   document.getElementById('customRow').style.display = 'none';
+
+  const objRow = document.getElementById('objektRow');
+  const objSelect = document.getElementById('objektSelect');
+  if(state.objects && state.objects.length){
+    const existing = state.shifts[activeCell.key];
+    objSelect.innerHTML = '<option value="">Kein Objekt</option>' +
+      state.objects.map(o=>`<option value="${o.id}">${escapeHtml(o.name)}</option>`).join('');
+    objSelect.value = existing && existing.objekt ? existing.objekt : '';
+    objRow.style.display = 'block';
+  } else {
+    objRow.style.display = 'none';
+  }
+
   document.getElementById('overlay').classList.add('show');
+}
+
+function currentObjektId(){
+  const objSelect = document.getElementById('objektSelect');
+  return (state.objects && state.objects.length && objSelect.value) ? objSelect.value : null;
 }
 
 function pickPreset(key){
@@ -416,7 +536,7 @@ function pickPreset(key){
     return;
   }
   const p = PRESETS[key];
-  state.shifts[activeCell.key] = {type:key, start:p.start, end:p.end, hours: p.hours};
+  state.shifts[activeCell.key] = {type:key, start:p.start, end:p.end, hours: p.hours, objekt: currentObjektId()};
   closeSheet();
   render();
 }
@@ -424,7 +544,7 @@ function pickPreset(key){
 function applyCustom(){
   const start = document.getElementById('customStart').value;
   const end = document.getElementById('customEnd').value;
-  state.shifts[activeCell.key] = {type:'custom', start, end};
+  state.shifts[activeCell.key] = {type:'custom', start, end, objekt: currentObjektId()};
   closeSheet();
   render();
 }
@@ -440,21 +560,50 @@ function closeSheet(){
   activeCell = null;
 }
 
-/* ---------- PDF Export ---------- */
-function exportPDF(){
+/* ---------- PDF Sheet Steuerung ---------- */
+function openPdfSheet(){ document.getElementById('pdfOverlay').classList.add('show'); }
+function closePdfSheet(){ document.getElementById('pdfOverlay').classList.remove('show'); }
+
+function pdfHeader(doc, title){
+  const compName = (state.company && state.company.name) ? state.company.name : '';
+  const compAddr = (state.company && state.company.address) ? state.company.address : '';
+  let y0 = 14;
+  if(compName){
+    doc.setFontSize(10);
+    doc.setFont(undefined,'bold');
+    doc.setTextColor(0);
+    doc.text(compName, 14, y0);
+    y0 += 5;
+    if(compAddr){
+      doc.setFontSize(8);
+      doc.setFont(undefined,'normal');
+      doc.setTextColor(120);
+      doc.text(compAddr, 14, y0);
+      y0 += 5;
+    }
+    y0 += 3;
+  }
+  doc.setFontSize(15);
+  doc.setFont(undefined,'bold');
+  doc.setTextColor(0);
+  doc.text(title, 14, y0);
+  y0 += 6;
+  doc.setFontSize(9);
+  doc.setFont(undefined,'normal');
+  doc.setTextColor(120);
+  doc.text(`Erstellt am ${new Date().toLocaleDateString('de-DE')}`, 14, y0);
+  return y0 + 5;
+}
+
+/* ---------- PDF Export: Team-Übersicht ---------- */
+function exportTeamPDF(){
+  closePdfSheet();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({orientation:'landscape', unit:'mm', format:'a4'});
   const y = cur.getFullYear(), m = cur.getMonth();
   const nDays = daysInMonth(cur);
   const title = `Dienstplan – ${MONTHNAMES[m]} ${y}`;
-
-  doc.setFontSize(15);
-  doc.setFont(undefined,'bold');
-  doc.text(title, 14, 14);
-  doc.setFontSize(9);
-  doc.setFont(undefined,'normal');
-  doc.setTextColor(120);
-  doc.text(`Erstellt am ${new Date().toLocaleDateString('de-DE')}`, 14, 20);
+  const startY = pdfHeader(doc, title);
 
   const head = [['Mitarbeiter', ...Array.from({length:nDays},(_,i)=>String(i+1)), 'Σ']];
   const PDF_COLORS = {
@@ -495,7 +644,7 @@ function exportPDF(){
 
   doc.autoTable({
     head, body,
-    startY: 25,
+    startY: startY + 4,
     theme: 'grid',
     styles: { fontSize: 6.5, cellPadding: 1.2, halign:'center', valign:'middle' },
     headStyles: { fillColor: [30,34,41], textColor: 255, fontSize: 6.5 },
@@ -555,6 +704,94 @@ function exportPDF(){
   });
 
   doc.save(`Dienstplan_${MONTHNAMES[m]}_${y}.pdf`);
+}
+
+/* ---------- PDF Export: Einzel-Dienstpläne ---------- */
+function exportIndividualPDFs(){
+  closePdfSheet();
+  if(!state.employees.length){ alert('Noch keine Mitarbeiter angelegt.'); return; }
+  const { jsPDF } = window.jspdf;
+  const y = cur.getFullYear(), m = cur.getMonth();
+  const nDays = daysInMonth(cur);
+
+  const TYPE_LABEL = {
+    tag:'Tag (07–19)', spaet:'Spät (12–22)', nacht:'Nacht (19–07)',
+    urlaub:'Urlaub', krank:'Krank', frei:'Frei', custom:'Individuell'
+  };
+  const PDF_COLORS = {
+    tag:[76,159,232], spaet:[201,107,216], nacht:[122,90,38],
+    urlaub:[76,175,125], krank:[217,83,79], frei:[58,64,72], custom:[232,163,61]
+  };
+
+  state.employees.forEach((emp, idx)=>{
+    setTimeout(()=>{
+      const doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+      const startY = pdfHeader(doc, `Dienstplan – ${MONTHNAMES[m]} ${y}`);
+
+      doc.setFontSize(11);
+      doc.setFont(undefined,'bold');
+      doc.setTextColor(0);
+      doc.text(`Mitarbeiter: ${emp.name}`, 14, startY + 4);
+
+      const head = [['Tag', 'Datum', 'Schicht', 'Zeit', 'Objekt', 'Std.']];
+      const body = [];
+      let total = 0;
+      for(let d=1; d<=nDays; d++){
+        const entry = state.shifts[emp.id+'|'+fmtKey(y,m,d)];
+        const dateObj = new Date(y,m,d);
+        const wd = WD[dateObj.getDay()];
+        let schicht='—', zeit='', objekt='', hrs='';
+        if(entry){
+          schicht = TYPE_LABEL[entry.type] || entry.type;
+          zeit = (entry.start && entry.end) ? `${entry.start}–${entry.end}` : '';
+          const obj = entry.objekt ? state.objects.find(o=>o.id===entry.objekt) : null;
+          objekt = obj ? obj.name : '';
+          const h = calcHours(entry);
+          hrs = h ? String(h) : '';
+          total += h;
+        }
+        body.push([String(d), wd, schicht, zeit, objekt, hrs]);
+      }
+
+      doc.autoTable({
+        head, body,
+        startY: startY + 10,
+        theme: 'grid',
+        styles: { fontSize: 8.5, cellPadding: 2.2 },
+        headStyles: { fillColor: [30,34,41], textColor: 255 },
+        columnStyles: { 0:{cellWidth:10, halign:'center'}, 1:{cellWidth:14}, 5:{cellWidth:14, halign:'center'} },
+        didParseCell: function(data){
+          if(data.section==='body' && data.column.index===2){
+            const dateObj = new Date(y,m,data.row.index+1);
+            const wd = dateObj.getDay();
+            const entry = state.shifts[emp.id+'|'+fmtKey(y,m,data.row.index+1)];
+            if(entry && PDF_COLORS[entry.type]){
+              const c = PDF_COLORS[entry.type];
+              data.cell.styles.fillColor = c;
+              data.cell.styles.textColor = (entry.type==='nacht'||entry.type==='krank') ? [255,255,255] : [20,23,28];
+              data.cell.styles.fontStyle = 'bold';
+            } else if(wd===0||wd===6){
+              data.cell.styles.fillColor = [245,245,245];
+            }
+          }
+        }
+      });
+
+      let finalY = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(11);
+      doc.setFont(undefined,'bold');
+      doc.setTextColor(0);
+      doc.text(`Gesamtstunden: ${total} Std.`, 14, finalY);
+
+      doc.setFontSize(8);
+      doc.setFont(undefined,'normal');
+      doc.setTextColor(140);
+      doc.text('Dieser Plan enthält ausschließlich Ihre eigenen Schichten.', 14, finalY + 8);
+
+      const safeName = emp.name.replace(/[^a-zA-Z0-9äöüÄÖÜß\-_ ]/g,'').replace(/\s+/g,'_');
+      doc.save(`Dienstplan_${safeName}_${MONTHNAMES[m]}_${y}.pdf`);
+    }, idx * 350); // leichte Verzögerung, damit der Browser Mehrfach-Downloads nicht blockt
+  });
 }
 
 /* ---------- Init ---------- */
